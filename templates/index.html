@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8f5">
+  <meta name="description" content="Trapdoor helps you investigate suspicious messages with clear, evidence-based signals.">
+  <title>Trapdoor — Phishing, investigated.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Trapdoor home">
+        <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 12.2 16 6l9 6.2v12.1a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V12.2Z"/><path d="M12 26V15h8v11M10 12h12"/></svg></span>
+        <span class="brand-name">trapdoor<span class="brand-dot">.</span><small>INVESTIGATION LAB</small></span>
+      </a>
+      <div class="sidebar-label">WORKSPACE</div>
+      <button class="nav-item active" type="button"><span class="nav-icon">⌕</span> New investigation</button>
+      <div class="sidebar-card">
+        <div class="pulse-dot"></div><span>LOCAL ANALYSIS</span>
+        <p>Your text is processed by this local app. No links are opened.</p>
+      </div>
+      <div class="side-bottom">
+        <div class="side-divider"></div>
+        <a class="side-link" href="https://github.com/shubhmroot/trapdoor" target="_blank" rel="noreferrer"><span>↗</span> Project repository</a>
+        <div class="profile"><div class="avatar">T</div><div><b>Trapdoor Lab</b><small>Community edition</small></div><span class="profile-more">···</span></div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar"><div class="crumb">Workspace <span>/</span> <b>New investigation</b></div><div class="top-right"><span class="safe-chip"><i></i> SAFE MODE</span><button class="help-button" type="button" aria-label="About this demo" title="About this demo">?</button></div></header>
+      <section class="content">
+        <div class="intro">
+          <div class="eyebrow"><span></span> PHISHING, INVESTIGATED</div>
+          <h1>See the clues.<br><em>Make the call.</em></h1>
+          <p class="intro-copy">A suspicious message deserves more than a guess. Examine its signals and see the evidence behind them.</p>
+        </div>
+
+        <section class="investigate-card" aria-labelledby="input-heading">
+          <div class="card-heading"><div><div class="step-label"><span>01</span> START AN INVESTIGATION</div><h2 id="input-heading">What would you like to check?</h2></div><div class="input-type"><label for="inputType">INPUT TYPE</label><select id="inputType"><option value="auto">Auto detect</option><option value="url">URL</option><option value="email">Email</option><option value="sms">SMS</option></select></div></div>
+          <label class="sr-only" for="messageInput">Suspicious URL, email, or SMS</label>
+          <div class="textarea-wrap"><textarea id="messageInput" maxlength="20000" placeholder="Paste a suspicious URL, email, or text message here…" spellcheck="false"></textarea><div class="textarea-foot"><span class="privacy-note"><span>⌑</span> Your content is analyzed locally by this demo</span><span id="charCount">0 / 20,000</span></div></div>
+          <div class="form-footer"><div class="examples"><span>TRY AN EXAMPLE</span><button class="example-chip" data-example="safe">Routine update</button><button class="example-chip" data-example="suspicious">Urgent account alert</button></div><button class="analyze-button" id="analyzeButton"><span class="button-icon">↗</span> Analyze message</button></div>
+          <div class="error-message" id="errorMessage" role="alert"></div>
+        </section>
+
+        <section class="results" id="results" aria-live="polite" hidden>
+          <div class="result-head"><div><div class="step-label"><span>02</span> INVESTIGATION REPORT</div><h2>Your findings</h2></div><button class="reset-button" id="resetButton">↺ <span>New scan</span></button></div>
+          <div id="reportContent"></div>
+        </section>
+
+        <footer class="page-footer"><span>Trapdoor is a decision aid, not a verdict.</span><span>Rules-based demo <b>·</b> Reputation data unavailable</span></footer>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
+

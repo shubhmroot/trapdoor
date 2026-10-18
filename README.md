@@ -39,6 +39,17 @@ python app.py
 
 The page shows whether a key is configured. Live inspection is selected by default when you submit an investigation; you can turn it off before analyzing. Only extracted URLs are sent to TinyFish, up to three per scan. Pasted email and SMS text remains in Trapdoor. Because a URL can contain private query values, review the URL before using the live check. The check fetches page content without clicking, submitting forms, or downloading files. The app skips non-web schemes, private IP addresses, reserved demo domains, credentialed URLs, and nonstandard ports. TinyFish documents its Fetch endpoint, authentication, request format, and URL limits in its [Fetch API reference](https://docs.tinyfish.ai/fetch-api/reference).
 
+## Deploy on Netlify with GitHub
+
+Netlify serves the web interface and the `/api/*` Netlify Function forwards requests to the Flask service. Netlify Functions do not run this Flask application directly, so the Python service must also be deployed. The included `render.yaml` configures a free Render web service from the same GitHub repository.
+
+1. Import `shubhmroot/trapdoor` at [Netlify](https://app.netlify.com/start). Netlify reads `netlify.toml` and builds the static interface and API proxy automatically.
+2. Create a Render Blueprint from the same repository at [Render](https://dashboard.render.com/blueprints). Render reads `render.yaml`; deploy the `trapdoor-api` service.
+3. In Render, open the new service's environment settings and copy the generated `TRAPDOOR_PROXY_TOKEN`. In Netlify, open **Project configuration → Environment variables** and set both `TRAPDOOR_BACKEND_URL` (the Render service HTTPS URL, such as `https://trapdoor-api.onrender.com`) and `TRAPDOOR_PROXY_TOKEN` (the generated secret). Save and redeploy the Netlify site. The token prevents direct public calls to the paid-fetch backend; Netlify also limits the API proxy to 10 requests per IP per minute.
+4. In Render, set `TINYFISH_API_KEY` under the `trapdoor-api` service's environment variables if you have a TinyFish key. Keep this secret out of GitHub. Without it, the local rules still work and TinyFish reports that live inspection is not configured.
+
+The free Render service may sleep while idle, so the first analysis after a quiet period can take longer while it wakes. Later pushes to `main` trigger deploys on both linked services. Netlify environment variables are available to its function at runtime, and the backend URL is validated as HTTPS before forwarding.
+
 ## API example
 
 ```powershell
@@ -70,6 +81,10 @@ Run the regression benchmark with `python -m unittest -v`. It covers safe traps 
 trapdoor/
 ├── app.py                 # Flask routes and explainable analysis rules
 ├── requirements.txt
+├── netlify.toml           # Netlify static build + serverless API proxy
+├── netlify_build.py       # Exports the Flask template and assets for Netlify
+├── netlify/functions/     # Netlify API proxy function
+├── render.yaml            # Flask API service for Render
 ├── README.md
 ├── .env.example
 ├── .gitignore
@@ -116,4 +131,5 @@ AI-written explanations remain future work; any model should explain findings re
 ## License
 
 No license has been selected. Add one only after the team decides how the project may be reused.
+
 

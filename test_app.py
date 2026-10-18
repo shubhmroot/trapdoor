@@ -25,6 +25,18 @@ class TrapdoorAnalysisTests(unittest.TestCase):
         stylesheet.close()
         script.close()
 
+    def test_hosted_api_requires_the_netlify_proxy_token(self):
+        with patch.dict(os.environ, {"TRAPDOOR_PROXY_TOKEN": "deployment-secret"}):
+            denied = self.client.post("/api/analyze", json={"text": "hello"})
+            allowed = self.client.post(
+                "/api/analyze", json={"text": "hello"},
+                headers={"Authorization": "Bearer deployment-secret"},
+            )
+            health = self.client.get("/api/health")
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(health.status_code, 200)
+
     def test_valid_input_returns_structured_report(self):
         response = self.client.post("/api/analyze", json={"text": "Routine library notice. No action needed."})
         self.assertEqual(response.status_code, 200)
@@ -391,4 +403,5 @@ class TrapdoorAnalysisTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -1,0 +1,9 @@
+[build]
+  command = "python -m pip install -r requirements.txt && python netlify_build.py"
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+

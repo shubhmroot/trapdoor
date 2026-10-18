@@ -21,15 +21,17 @@ function escapeHtml(value) {
 }
 
 function render(data) {
-  const tone = data.verdict === 'HIGH_RISK' ? 'high' : data.verdict === 'MEDIUM_RISK' ? 'medium' : data.verdict === 'LOW_RISK' ? 'low' : 'clear';
+  const tone = ['CRITICAL_RISK', 'HIGH_RISK'].includes(data.verdict) ? 'high' : data.verdict === 'MEDIUM_RISK' ? 'medium' : data.verdict === 'LOW_RISK' ? 'low' : 'clear';
   const findings = data.findings.length ? data.findings.map((item) => `
-    <article class="finding"><div class="finding-icon ${escapeHtml(item.severity)}">${item.severity === 'high' ? '!' : '◇'}</div><div><b>${escapeHtml(item.title)}</b><p>${escapeHtml(item.evidence)}</p><div class="finding-source">${escapeHtml(item.source)} · ${escapeHtml(item.severity)} signal</div></div></article>`).join('') : '<div class="empty-findings">No warning patterns matched these demo rules. Unknown reputation means there is no external safety confirmation.</div>';
+    <article class="finding"><div class="finding-icon ${escapeHtml(item.severity)}">${item.severity === 'high' ? '!' : '◇'}</div><div><b>${escapeHtml(item.title)}</b><p>${escapeHtml(item.evidence)}</p><div class="finding-source">${escapeHtml(item.source)} · ${escapeHtml(item.severity)} signal</div></div></article>`).join('') : '<div class="empty-findings">No obvious warning signs matched these rules. If you expected this link and the address is the site you meant to visit, it is likely okay to open.</div>';
   const recommendations = data.recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const urls = data.urls.length ? `<div class="reputation-line">Destination${data.urls.length > 1 ? 's' : ''}: ${data.urls.map((item) => `<code>${escapeHtml(item.host || item.value)}</code>`).join(' · ')}</div>` : '';
-  report.innerHTML = `<p class="report-summary">${escapeHtml(data.summary)}</p><div class="report-grid">
-    <section class="verdict-card ${tone}"><div class="verdict-top">HEURISTIC ASSESSMENT</div><div class="verdict-label">${escapeHtml(data.label)}</div><div class="score-line"><span class="score-value">${data.risk_score}</span> / 100 signal score</div><div class="meter"><span style="width:${data.risk_score}%"></span></div><div class="disclaimer-small">A rule score, not a probability of phishing.</div><div class="reputation-line">Reputation: not checked · ${escapeHtml(data.reputation.detail)}</div>${urls}</section>
+  const emails = data.emails?.length ? `<div class="reputation-line">Email address${data.emails.length > 1 ? 'es' : ''}: ${data.emails.map((item) => `<code>${escapeHtml(item.value)}</code>`).join(' · ')}</div>` : '';
+  const coverage = (data.coverage_notes || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  report.innerHTML = `<div class="decision-banner ${tone}"><span class="decision-label">${escapeHtml(data.action_label || 'Review this result')}</span><p>${escapeHtml(data.recommended_action || data.summary)}</p></div><p class="report-summary">${escapeHtml(data.summary)}</p><div class="report-grid">
+    <section class="verdict-card ${tone}"><div class="verdict-top">RULE CHECK RESULT</div><div class="verdict-label">${escapeHtml(data.label)}</div><div class="score-line"><span class="score-value">${data.risk_score}</span> / 100 matched-signal points</div><div class="meter"><span style="width:${data.risk_score}%"></span></div><div class="disclaimer-small">Points count matching rules; they are not a phishing probability.</div><div class="reputation-line">Reputation: not checked · ${escapeHtml(data.reputation.detail)}</div>${urls}${emails}</section>
     <section class="findings-card"><h3>Evidence found <span style="color:#a3ada7;font-weight:400">(${data.findings.length})</span></h3>${findings}</section>
-  </div><section class="recommend-card"><h3>Safer next steps</h3><ul>${recommendations}</ul></section>`;
+  </div><section class="recommend-card"><h3>Safer next steps</h3><ul>${recommendations}</ul><details class="coverage-details"><summary>What this checker cannot confirm</summary><ul>${coverage}</ul></details></section>`;
   results.hidden = false;
   results.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
 }

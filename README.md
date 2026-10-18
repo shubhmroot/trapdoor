@@ -9,9 +9,9 @@ Trapdoor is an evidence-first phishing investigation lab. Paste a suspicious URL
 ## What works
 
 - Flask web application with URL, email, and SMS input modes.
-- URL extraction and checks for IP-address hosts, plain HTTP, misleading `@` URL authority, unusual hostnames, encoded or punycode text, and brand names outside a recognized official domain.
+- URL and email checks for mixed-script and punycode lookalikes, invisible/bidi characters, Unicode slash confusion, backslash and `@` parser confusion, decimal/octal/hex IPs, nested and encoded redirects, risky file extensions, long subdomains, display-name spoofing, header mismatches, and payment-change language.
 - Message checks for urgency, credential requests, threats, and payment context.
-- Deduplicated weighted findings, a bounded 0–100 heuristic score, readable evidence, and next-step guidance.
+- Deduplicated weighted findings, a bounded 0–100 heuristic score, a prominent action recommendation, readable evidence, and explicit coverage limits.
 - Responsive interface with safe demonstration examples and an explicit unknown reputation state.
 - JSON API at `POST /api/analyze` and health endpoint at `GET /api/health`.
 
@@ -38,7 +38,7 @@ Invoke-RestMethod -Uri http://127.0.0.1:5000/api/analyze `
   -Body '{"text":"URGENT: verify your account at http://paypal-security-check.example.test/login","input_type":"sms"}'
 ```
 
-The response includes `verdict`, `risk_score`, `score_type`, `summary`, `findings`, extracted URL hosts, reputation status, and recommendations. Possible verdicts are `HIGH_RISK`, `MEDIUM_RISK`, `LOW_RISK`, and `NO_SIGNALS_FOUND`. A clean result means only that the current demo rules did not match; it does not mean safe.
+The response includes `verdict`, `risk_score`, `score_type`, `recommended_action`, `summary`, `findings`, extracted URL/email data, reputation status, and coverage notes. Possible verdicts are `CRITICAL_RISK`, `HIGH_RISK`, `MEDIUM_RISK`, `LOW_RISK`, and `NO_SIGNALS_FOUND`. A clean result says no obvious warning signs matched and tells the user it is reasonable to continue if the link or email was expected and matches the intended sender or site. It also states that page content and reputation were not checked.
 
 ## Safe demo cases
 
@@ -51,7 +51,9 @@ Other useful manual inputs include `http://192.0.2.10/sign-in` (reserved documen
 
 ## How the score works
 
-Each distinct rule contributes its documented weight in `app.py`. The score is capped at 100. Bands are currently 0 = no rule signals, 1–19 = low, 20–39 = medium, and 40+ = high. The weights and bands are demo choices, not calibrated probabilities or a validated detector. Findings retain their evidence and source so users can review each signal. Missing reputation data stays `not_checked`; it is never treated as benign evidence.
+Each distinct rule contributes its documented weight in `app.py`. The score is capped at 100. Bands are 0 = no obvious warning signs, 1–24 = caution, 25–49 = suspicious, 50–74 = high risk, and 75+ = strong warning signs. These are matched-signal points, not calibrated probabilities. The rules are deterministic heuristics, not a machine-learning model; adding patterns is regression-tested against the supplied examples but does not constitute model training or prove real-world accuracy. Findings retain their evidence and source so users can review each signal. Missing reputation data stays `not_checked`; it is not treated as a benign signal.
+
+Run the regression benchmark with `python -m unittest -v`. It covers safe traps and suspicious URL/email examples, including Unicode, parser confusion, IP notation, encoded redirects, headers, payment-change language, and the user's expected decision for clean, caution, and high-risk results. It is a small hand-built test set, not a representative accuracy study.
 
 ## Project structure
 
@@ -81,7 +83,7 @@ flowchart LR
 
 ## Architecture and security boundaries
 
-The browser sends pasted text to the local Flask endpoint. The analysis code extracts URLs and applies deterministic rules. It does not perform DNS lookups, follow redirects, fetch page content, or query threat-intelligence services. Keep these boundaries in place if adding live lookups later; remote URL fetching needs isolation and strict controls to avoid server-side request forgery.
+The browser sends pasted text to the local Flask endpoint. The analysis code extracts URLs and applies deterministic rules. It does not perform DNS lookups, follow redirects, fetch page content, inspect QR images or attachments, query domain age/reputation, or detect content swapped after delivery. Some attacks depend on the claimed company, known sender, conversation history, or page content; this edition cannot establish that context. Keep these boundaries in place if adding live lookups later; remote URL fetching needs isolation and strict controls to avoid server-side request forgery.
 
 TinyFish and other external intelligence are future integrations. Add them only after reviewing the provider's current API documentation, terms, and credentials. Keep secrets in a local `.env` file, never commit that file, and never claim provider evidence until the integration actually returns it. AI explanations are also future work; any model should only explain findings returned by the rules and must not manufacture evidence.
 

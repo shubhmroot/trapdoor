@@ -64,4 +64,3 @@ export const config = {
     windowLimit: 10,
   },
 };
-

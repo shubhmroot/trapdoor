@@ -6,8 +6,12 @@ import base64
 import binascii
 import ipaddress
 import html
+import json
+import os
 import re
 import unicodedata
+import urllib.error
+import urllib.request
 from difflib import SequenceMatcher
 from email.parser import Parser
 from email.policy import default as email_policy
@@ -16,8 +20,19 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 from flask import Flask, jsonify, render_template, request
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # Environment variables still work when python-dotenv is unavailable.
+    load_dotenv = None
+
+if load_dotenv:
+    load_dotenv()
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024
+TINYFISH_FETCH_ENDPOINT = "https://api.fetch.tinyfish.ai"
+TINYFISH_MAX_URLS = 3
+TINYFISH_TEXT_LIMIT = 1200
 
 BRANDS = {
     "paypal": {"paypal.com"},
@@ -144,6 +159,207 @@ def host_parts(value: str) -> tuple[str | None, str | None, str | None]:
         return host, parsed.scheme.lower() or None, registrable
     except ValueError:
         return None, None, None
+
+
+def _tinyfish_safe_url(value: str) -> str | None:
+    """Return a URL safe to submit to TinyFish, or None for ambiguous/local targets."""
+    candidate = normalized_url(value)
+    if "\\" in candidate or any(ord(char) < 32 for char in candidate):
+        return None
+    try:
+        parsed = urlsplit(candidate)
+        host = (parsed.hostname or "").rstrip(".").lower()
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {"http", "https"} or not host:
+        return None
+    if parsed.username is not None or parsed.password is not None or "@" in parsed.netloc:
+        return None
+    if port not in {None, 80, 443}:
+        return None
+    if host.endswith((".localhost", ".local", ".test", ".example", ".invalid")):
+        return None
+    if host in {"example.com", "example.org", "example.net"}:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            # Reject malformed IDNs and labels before handing the URL to a remote fetcher.
+            ascii_host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
+        labels = ascii_host.split(".")
+        if "." not in ascii_host or any(
+            not label or len(label) > 63 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+            for label in labels
+        ):
+            return None
+    else:
+        if not address.is_global:
+            return None
+    return candidate
+
+
+def _tinyfish_api_key() -> str:
+    key = os.getenv("TINYFISH_API_KEY", "").strip()
+    if key.lower() in {"your_tinyfish_api_key_here", "replace_me", "changeme"}:
+        return ""
+    return key
+
+
+def _tinyfish_fetch(urls: list[str]) -> dict:
+    """Fetch URLs through TinyFish; only URL strings are sent, never the pasted message."""
+    api_key = _tinyfish_api_key()
+    if not api_key:
+        return {
+            "status": "not_configured",
+            "provider": "TinyFish",
+            "detail": "TinyFish is not configured. Set TINYFISH_API_KEY in the app environment and restart Trapdoor.",
+            "pages": [],
+        }
+    if not urls:
+        return {
+            "status": "skipped",
+            "provider": "TinyFish",
+            "detail": "No public HTTP or HTTPS URL was eligible for a live fetch. Local-only, reserved, ambiguous, and non-web addresses are skipped.",
+            "pages": [],
+        }
+
+    request_body = json.dumps({
+        "urls": urls,
+        "format": "markdown",
+        "ttl": 0,
+        "per_url_timeout_ms": 30000,
+        "purpose": "Read-only phishing investigation: inspect the visible page title, final URL, and page text. Do not click, sign in, submit forms, or download files.",
+    }).encode("utf-8")
+    api_request = urllib.request.Request(
+        TINYFISH_FETCH_ENDPOINT,
+        data=request_body,
+        headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(api_request, timeout=40) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError):
+        return {
+            "status": "unavailable",
+            "provider": "TinyFish",
+            "detail": "TinyFish could not complete the live page check. The local rule findings are still available; this failure is not a safe result.",
+            "pages": [],
+        }
+
+    results_by_url = {}
+    for page in payload.get("results", []) if isinstance(payload, dict) else []:
+        if isinstance(page, dict):
+            results_by_url[str(page.get("url", ""))] = page
+    errors_by_url = {}
+    for error in payload.get("errors", []) if isinstance(payload, dict) else []:
+        if isinstance(error, dict):
+            errors_by_url[str(error.get("url", ""))] = error
+
+    pages = []
+    failed = 0
+    for url in urls:
+        item = results_by_url.get(url)
+        if item:
+            text_value = item.get("text", "")
+            if not isinstance(text_value, str):
+                text_value = json.dumps(text_value, ensure_ascii=False)
+            pages.append({
+                "status": "checked",
+                "url": str(item.get("url") or url),
+                "final_url": str(item.get("final_url") or item.get("url") or url),
+                "title": str(item.get("title") or "Page title unavailable")[:240],
+                "description": str(item.get("description") or "")[:400],
+                "text_excerpt": re.sub(r"\s+", " ", text_value).strip()[:TINYFISH_TEXT_LIMIT],
+            })
+        else:
+            failed += 1
+            error = errors_by_url.get(url, {})
+            pages.append({
+                "status": "unavailable",
+                "url": url,
+                "detail": str(error.get("error") or error.get("code") or "TinyFish could not fetch this page.")[:240],
+            })
+
+    checked = sum(page["status"] == "checked" for page in pages)
+    status = "checked" if checked else "unavailable"
+    if failed and checked:
+        detail = f"TinyFish fetched {checked} page(s); {failed} URL(s) could not be fetched."
+    elif checked:
+        detail = f"TinyFish fetched {checked} live page(s). Review the returned title, final URL, and excerpt as additional evidence."
+    else:
+        detail = "TinyFish could not fetch these pages. The failure is unknown, not a clean bill of health."
+    return {"status": status, "provider": "TinyFish", "detail": detail, "pages": pages}
+
+
+def _add_tinyfish_findings(report: dict, inspection: dict) -> None:
+    """Add only concrete live-page signals, then refresh the report's decision fields."""
+    additions = []
+    for page in inspection.get("pages", []):
+        if page.get("status") != "checked":
+            continue
+        requested_host = host_parts(page.get("url", ""))[0]
+        final_host = host_parts(page.get("final_url", ""))[0]
+        if requested_host and final_host and _registrable_host(requested_host) != _registrable_host(final_host):
+            additions.append(_finding(
+                "TINYFISH_CROSS_SITE_REDIRECT", "medium", "The live page ended on a different registered site",
+                f"TinyFish fetched {requested_host} and reported the final page at {final_host}. Cross-site redirects can be legitimate, but verify the final destination before signing in or paying.",
+                "TinyFish live page check", 18,
+            ))
+
+        title = page.get("title", "")
+        title_skeleton = _confusable_skeleton(title)
+        action_in_title = bool(re.search(r"(?i)\b(sign\s*in|log\s*in|account|password|verify|security)\b", title))
+        if action_in_title:
+            for brand, official_domains in BRANDS.items():
+                if brand in title_skeleton and final_host and not _is_official_brand_domain(final_host, official_domains):
+                    additions.append(_finding(
+                        "TINYFISH_BRAND_LOGIN_TITLE", "high", f"The live page title pairs {brand.title()} with an account action on another domain",
+                        f"TinyFish returned the page title {title!r} at {final_host}. A brand and sign-in or account title on a nonofficial domain needs independent verification.",
+                        "TinyFish live page check", 38,
+                    ))
+                    break
+
+    present = {finding["rule"] for finding in report["findings"]}
+    for item in additions:
+        if item["rule"] not in present:
+            report["findings"].append(item)
+            present.add(item["rule"])
+    score = min(100, sum(item["weight"] for item in report["findings"]))
+    if score >= 75:
+        verdict, label = "CRITICAL_RISK", "Strong danger signals"
+    elif score >= 50:
+        verdict, label = "HIGH_RISK", "High risk signals"
+    elif score >= 25:
+        verdict, label = "MEDIUM_RISK", "Review these risk signals"
+    elif score > 0:
+        verdict, label = "LOW_RISK", "Caution signal found"
+    else:
+        verdict, label = "NO_SIGNALS_FOUND", "No obvious signals found"
+    action, action_label = _next_step(score, report["emails"], report["urls"])
+    report.update({"verdict": verdict, "label": label, "action_label": action_label,
+                   "recommended_action": action, "risk_score": score})
+    report["recommendations"] = [action]
+    if score >= 25:
+        report["recommendations"].append("Contact the organization using a phone number or website you already trust, not details in this message.")
+    elif score > 0:
+        report["recommendations"].append("A low-level warning can be benign; confirm the destination before entering credentials or paying.")
+    else:
+        report["recommendations"].append("Before signing in or paying, check that the address bar shows the exact site you meant to visit.")
+    if score >= 50:
+        report["recommendations"].append("If you already shared a password or code, change it through the official service and contact its support team.")
+    if not report["findings"]:
+        report["summary"] = "TinyFish fetched the live page and no obvious warning patterns matched the URL or returned page title. If you expected this link and the final address matches the site you intended, it is reasonable to open; review the page details below."
+    elif verdict in {"HIGH_RISK", "CRITICAL_RISK"}:
+        report["summary"] = "Strong warning patterns appeared in the local rules or live page evidence. Do not use the link; verify through a trusted channel."
+    elif verdict == "MEDIUM_RISK":
+        report["summary"] = "Suspicious patterns appeared in the local rules or live page evidence. Hold off on signing in, paying, downloading, or sharing codes until you verify the destination."
+    else:
+        report["summary"] = "Warning patterns appeared in the local rules or live page evidence. Review the evidence; a single caution signal can also occur on a legitimate site."
 
 
 def _ip_address(host: str) -> tuple[str | None, bool]:
@@ -928,6 +1144,7 @@ def analyze(text: str, input_type: str = "auto") -> dict:
         "urls": [{"value": url, "host": host_parts(url)[0]} for url in urls],
         "emails": [{"value": email["value"], "domain": email["domain"]} for email in emails],
         "reputation": {"status": "not_checked", "detail": "No external reputation provider is configured; this result uses explainable local checks only."},
+        "live_inspection": {"status": "not_requested", "provider": "TinyFish", "detail": "Live page inspection was not requested.", "pages": []},
         "recommendations": recommendations,
         "coverage_notes": coverage_notes,
         "input_type": input_type,
@@ -942,7 +1159,8 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify({"status": "ok", "service": "Trapdoor", "version": "0.4.0"})
+    return jsonify({"status": "ok", "service": "Trapdoor", "version": "0.5.0",
+                    "tinyfish_configured": bool(_tinyfish_api_key())})
 
 
 @app.post("/api/analyze")
@@ -958,7 +1176,20 @@ def analyze_api():
         return jsonify({"error": "Input is too long. Please keep it under 20,000 characters."}), 413
     if input_type not in {"auto", "url", "email", "sms"}:
         return jsonify({"error": "Choose URL, email, SMS, or automatic detection."}), 400
-    return jsonify(analyze(text, input_type))
+    report = analyze(text, input_type)
+    if payload.get("tinyfish_enabled") is True:
+        safe_urls = []
+        for item in report["urls"]:
+            safe_url = _tinyfish_safe_url(item["value"])
+            if safe_url and safe_url not in safe_urls:
+                safe_urls.append(safe_url)
+        inspection = _tinyfish_fetch(safe_urls[:TINYFISH_MAX_URLS])
+        if len(safe_urls) > TINYFISH_MAX_URLS:
+            inspection["detail"] += f" Only the first {TINYFISH_MAX_URLS} eligible URLs were checked."
+        report["live_inspection"] = inspection
+        if inspection["status"] == "checked":
+            _add_tinyfish_findings(report, inspection)
+    return jsonify(report)
 
 
 if __name__ == "__main__":

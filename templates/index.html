@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='0.4.0') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='0.5.0') }}">
 </head>
 <body>
   <div class="app-shell">
@@ -21,8 +21,8 @@
       <div class="sidebar-label">WORKSPACE</div>
       <button class="nav-item active" type="button"><span class="nav-icon">⌕</span> New investigation</button>
       <div class="sidebar-card">
-        <div class="pulse-dot"></div><span>LOCAL ANALYSIS</span>
-        <p>Your text is processed by this local app. No links are opened.</p>
+        <div class="pulse-dot"></div><span>LOCAL RULES + TINYFISH</span>
+        <p>Text stays local. If enabled, TinyFish fetches extracted URLs for live page evidence.</p>
       </div>
       <div class="side-bottom">
         <div class="side-divider"></div>
@@ -43,7 +43,11 @@
         <section class="investigate-card" aria-labelledby="input-heading">
           <div class="card-heading"><div><div class="step-label"><span>01</span> START AN INVESTIGATION</div><h2 id="input-heading">What would you like to check?</h2></div><div class="input-type"><label for="inputType">INPUT TYPE</label><select id="inputType"><option value="auto">Auto detect</option><option value="url">URL</option><option value="email">Email</option><option value="sms">SMS</option></select></div></div>
           <label class="sr-only" for="messageInput">Suspicious URL, email, or SMS</label>
-          <div class="textarea-wrap"><textarea id="messageInput" maxlength="20000" placeholder="Paste a suspicious URL, email, or text message here…" spellcheck="false"></textarea><div class="textarea-foot"><span class="privacy-note"><span>⌑</span> Your content is analyzed locally by this demo</span><span id="charCount">0 / 20,000</span></div></div>
+          <div class="textarea-wrap"><textarea id="messageInput" maxlength="20000" placeholder="Paste a suspicious URL, email, or text message here…" spellcheck="false"></textarea><div class="textarea-foot"><span class="privacy-note"><span>⌑</span> Email and message text stay local; live checks send URLs to TinyFish</span><span id="charCount">0 / 20,000</span></div></div>
+          <div class="tinyfish-option">
+            <label class="tinyfish-check" for="tinyfishEnabled"><input id="tinyfishEnabled" type="checkbox" checked><span><b>Include TinyFish live page inspection</b><small>Checked by default. Only extracted URLs are sent; pasted email and SMS text stays local. TinyFish fetches pages read-only.</small></span></label>
+            <span id="tinyfishStatus" class="tinyfish-status">Checking TinyFish setup…</span>
+          </div>
           <div class="form-footer"><div class="examples"><span>TRY AN EXAMPLE</span><button class="example-chip" data-example="safe">Routine update</button><button class="example-chip" data-example="suspicious">Urgent account alert</button></div><button class="analyze-button" id="analyzeButton"><span class="button-icon">↗</span> Analyze message</button></div>
           <div class="error-message" id="errorMessage" role="alert"></div>
         </section>
@@ -53,12 +57,12 @@
           <div id="reportContent"></div>
         </section>
 
-        <footer class="page-footer"><span>Trapdoor is a decision aid, not a verdict.</span><span>Rules-based demo <b>·</b> Reputation data unavailable</span></footer>
+        <footer class="page-footer"><span>Trapdoor is a decision aid, not a verdict.</span><span>Local rules + TinyFish page evidence <b>·</b> Reputation data unavailable</span></footer>
       </section>
     </main>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="{{ url_for('static', filename='script.js', v='0.4.0') }}"></script>
+  <script src="{{ url_for('static', filename='script.js', v='0.5.0') }}"></script>
 </body>
 </html>
 

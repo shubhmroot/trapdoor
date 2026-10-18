@@ -1,6 +1,9 @@
+import json
+import os
 import unittest
+from unittest.mock import patch
 
-from app import analyze, app, analyze_url
+from app import analyze, app, analyze_url, _tinyfish_safe_url
 
 
 class TrapdoorAnalysisTests(unittest.TestCase):
@@ -29,6 +32,87 @@ class TrapdoorAnalysisTests(unittest.TestCase):
         self.assertEqual(payload["score_type"], "heuristic")
         self.assertEqual(payload["reputation"]["status"], "not_checked")
         self.assertIn("findings", payload)
+
+    def test_live_check_without_key_is_explicit_and_makes_no_network_call(self):
+        with patch.dict(os.environ, {"TINYFISH_API_KEY": ""}), patch("app.urllib.request.urlopen") as open_url:
+            response = self.client.post("/api/analyze", json={
+                "text": "https://wikipedia.org/wiki/Phishing plus support@example.org",
+                "tinyfish_enabled": True,
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["live_inspection"]["status"], "not_configured")
+        open_url.assert_not_called()
+
+    def test_key_template_placeholder_is_not_mistaken_for_a_real_key(self):
+        with patch.dict(os.environ, {"TINYFISH_API_KEY": "your_tinyfish_api_key_here"}):
+            response = self.client.get("/api/health")
+        self.assertFalse(response.get_json()["tinyfish_configured"])
+
+    def test_tinyfish_url_filter_skips_local_reserved_and_ambiguous_targets(self):
+        for value in (
+            "http://127.0.0.1/admin",
+            "http://192.0.2.45/login",
+            "http://localhost:5000/",
+            "https://mail.test/login",
+            "https://example.com/contact",
+            "https://trusted.example.com@evil.test/login",
+            "https://wikipedia.org:8443/",
+            "data:text/html,hello",
+        ):
+            with self.subTest(value=value):
+                self.assertIsNone(_tinyfish_safe_url(value))
+        self.assertEqual(_tinyfish_safe_url("https://wikipedia.org/wiki/Phishing"), "https://wikipedia.org/wiki/Phishing")
+
+    def test_tinyfish_fetch_contributes_page_evidence_and_sends_only_urls(self):
+        payload = {"results": [{
+            "url": "https://wikipedia.org/wiki/Phishing",
+            "final_url": "https://wikipedia.org/wiki/Phishing",
+            "title": "PayPal secure sign in",
+            "description": "Sign in to your account",
+            "text": "Enter your password to continue.",
+        }], "errors": []}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return json.dumps(payload).encode("utf-8")
+
+        with patch.dict(os.environ, {"TINYFISH_API_KEY": "test-key"}), patch("app.urllib.request.urlopen", return_value=FakeResponse()) as open_url:
+            response = self.client.post("/api/analyze", json={
+                "text": "Review https://wikipedia.org/wiki/Phishing. Sender: support@example.org",
+                "tinyfish_enabled": True,
+            })
+
+        self.assertEqual(response.status_code, 200)
+        report = response.get_json()
+        self.assertEqual(report["live_inspection"]["status"], "checked")
+        self.assertEqual(report["live_inspection"]["pages"][0]["title"], "PayPal secure sign in")
+        self.assertIn("TINYFISH_BRAND_LOGIN_TITLE", {item["rule"] for item in report["findings"]})
+        sent_body = json.loads(open_url.call_args.args[0].data)
+        self.assertEqual(sent_body["urls"], ["https://wikipedia.org/wiki/Phishing"])
+        self.assertNotIn("support@example.org", json.dumps(sent_body))
+
+    def test_tinyfish_outage_is_not_a_safety_signal(self):
+        with patch.dict(os.environ, {"TINYFISH_API_KEY": "test-key"}), patch("app.urllib.request.urlopen", side_effect=TimeoutError()):
+            response = self.client.post("/api/analyze", json={
+                "text": "https://wikipedia.org/",
+                "tinyfish_enabled": True,
+            })
+        report = response.get_json()
+        self.assertEqual(report["live_inspection"]["status"], "unavailable")
+        self.assertIn("not a safe result", report["live_inspection"]["detail"])
+
+    def test_tinyfish_is_not_called_when_user_turns_live_check_off(self):
+        with patch.dict(os.environ, {"TINYFISH_API_KEY": "test-key"}), patch("app.urllib.request.urlopen") as open_url:
+            response = self.client.post("/api/analyze", json={
+                "text": "https://wikipedia.org/",
+                "tinyfish_enabled": False,
+            })
+        self.assertEqual(response.get_json()["live_inspection"]["status"], "not_requested")
+        open_url.assert_not_called()
 
     def test_urgent_credential_message_surfaces_evidence(self):
         result = analyze("URGENT: verify your account today at http://paypaI.example.test/login", "sms")

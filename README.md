@@ -4,7 +4,7 @@
 
 Trapdoor is an evidence-first phishing investigation lab. Paste a suspicious URL, email, or SMS to review the warning patterns its local rules detect and the reasons behind them.
 
-> This repository contains a working MVP. The score is a transparent heuristic, not a probability. External reputation checks, AI explanations, and TinyFish browsing are not implemented in this version. No submitted URL is opened or fetched.
+> This repository contains a working MVP. The score is a transparent heuristic, not a probability. When enabled, TinyFish fetches public URLs and returns page evidence; Trapdoor does not submit forms or treat a failed fetch as a safe result. This is not a domain reputation service.
 
 ## What works
 
@@ -13,6 +13,7 @@ Trapdoor is an evidence-first phishing investigation lab. Paste a suspicious URL
 - Message checks for urgency, credential requests, threats, and payment context.
 - Deduplicated weighted findings, a bounded 0–100 heuristic score, a prominent action recommendation, readable evidence, and explicit coverage limits.
 - Responsive interface with safe demonstration examples and an explicit unknown reputation state.
+- Optional TinyFish Fetch API integration for rendered page title, final URL, description, and text excerpt. A cross-site final redirect or a nonofficial brand sign-in title adds explainable findings.
 - JSON API at `POST /api/analyze` and health endpoint at `GET /api/health`.
 
 ## Run locally
@@ -28,7 +29,15 @@ python app.py
 
 Then open [http://127.0.0.1:5000](http://127.0.0.1:5000). On macOS or Linux, activate the environment with `source .venv/bin/activate`.
 
-No `.env` file or API key is required to run the MVP. The `.env.example` file documents that external providers are not configured.
+The local rules work without an API key. To enable TinyFish, copy `.env.example` to `.env`, add a key from [TinyFish API keys](https://agent.tinyfish.ai/api-keys), then restart Trapdoor:
+
+```powershell
+Copy-Item .env.example .env
+# Open .env and replace the placeholder with your key.
+python app.py
+```
+
+The page shows whether a key is configured. Live inspection is selected by default when you submit an investigation; you can turn it off before analyzing. Only extracted URLs are sent to TinyFish, up to three per scan. Pasted email and SMS text remains in Trapdoor. Because a URL can contain private query values, review the URL before using the live check. The check fetches page content without clicking, submitting forms, or downloading files. The app skips non-web schemes, private IP addresses, reserved demo domains, credentialed URLs, and nonstandard ports. TinyFish documents its Fetch endpoint, authentication, request format, and URL limits in its [Fetch API reference](https://docs.tinyfish.ai/fetch-api/reference).
 
 ## API example
 
@@ -38,7 +47,7 @@ Invoke-RestMethod -Uri http://127.0.0.1:5000/api/analyze `
   -Body '{"text":"URGENT: verify your account at http://paypal-security-check.example.test/login","input_type":"sms"}'
 ```
 
-The response includes `verdict`, `risk_score`, `score_type`, `recommended_action`, `summary`, `findings`, extracted URL/email data, reputation status, and coverage notes. Possible verdicts are `CRITICAL_RISK`, `HIGH_RISK`, `MEDIUM_RISK`, `LOW_RISK`, and `NO_SIGNALS_FOUND`. A clean result says no obvious warning signs matched and tells the user it is reasonable to continue if the link or email was expected and matches the intended sender or site. It also states that page content and reputation were not checked.
+The response includes `verdict`, `risk_score`, `score_type`, `recommended_action`, `summary`, `findings`, extracted URL/email data, reputation status, `live_inspection`, and coverage notes. Send `"tinyfish_enabled": true` to request a live fetch; omit it or set it to `false` to run local checks only. TinyFish status is reported as `checked`, `unavailable`, `not_configured`, `skipped`, or `not_requested`. A failed or skipped check never counts as reassuring evidence. Possible verdicts are `CRITICAL_RISK`, `HIGH_RISK`, `MEDIUM_RISK`, `LOW_RISK`, and `NO_SIGNALS_FOUND`.
 
 ## Safe demo cases
 
@@ -51,9 +60,9 @@ Other useful manual inputs include `http://192.0.2.10/sign-in` (reserved documen
 
 ## How the score works
 
-Each distinct rule contributes its documented weight in `app.py`. The score is capped at 100. Bands are 0 = no obvious warning signs, 1–24 = caution, 25–49 = suspicious, 50–74 = high risk, and 75+ = strong warning signs. These are matched-signal points, not calibrated probabilities. The rules are deterministic heuristics, not a machine-learning model; adding patterns is regression-tested against the supplied examples but does not constitute model training or prove real-world accuracy. Findings retain their evidence and source so users can review each signal. Missing reputation data stays `not_checked`; it is not treated as a benign signal.
+Each distinct rule contributes its documented weight in `app.py`. The score is capped at 100. Bands are 0 = no obvious warning signs, 1–24 = caution, 25–49 = suspicious, 50–74 = high risk, and 75+ = strong warning signs. These are matched-signal points, not calibrated probabilities. The rules are deterministic heuristics, not a machine-learning model; adding patterns is regression-tested against the supplied examples but does not constitute model training or prove real-world accuracy. TinyFish can add findings for a cross-site final redirect and a page title that pairs a known brand with sign-in or account language on a nonofficial domain. Findings retain their evidence and source so users can review each signal. Missing reputation data stays `not_checked`; it is not treated as a benign signal.
 
-Run the regression benchmark with `python -m unittest -v`. It covers safe traps and suspicious URL/email examples, including Unicode, parser confusion, IP notation, encoded redirects, headers, payment-change language, and the user's expected decision for clean, caution, and high-risk results. It is a small hand-built test set, not a representative accuracy study.
+Run the regression benchmark with `python -m unittest -v`. It covers safe traps and suspicious URL/email examples, including Unicode, parser confusion, IP notation, encoded redirects, headers, payment-change language, TinyFish URL safety checks, API response handling, and expected decisions. TinyFish calls are mocked in automated tests. The benchmark is a small hand-built test set, not a representative accuracy study.
 
 ## Project structure
 
@@ -76,16 +85,19 @@ trapdoor/
 ```mermaid
 flowchart LR
     A[Browser input] -->|POST /api/analyze| B[Flask API]
-    B --> C[URL and message rules]
+    B --> C[Local URL and message rules]
+    B -->|Optional: extracted URLs only| T[TinyFish Fetch API]
+    T -->|Title, final URL, page text| B
     C --> D[Evidence and heuristic score]
+    T --> D
     D -->|JSON report| A
 ```
 
 ## Architecture and security boundaries
 
-The browser sends pasted text to the local Flask endpoint. The analysis code extracts URLs and applies deterministic rules. It does not perform DNS lookups, follow redirects, fetch page content, inspect QR images or attachments, query domain age/reputation, or detect content swapped after delivery. Some attacks depend on the claimed company, known sender, conversation history, or page content; this edition cannot establish that context. Keep these boundaries in place if adding live lookups later; remote URL fetching needs isolation and strict controls to avoid server-side request forgery.
+The browser sends pasted text to the local Flask endpoint, where deterministic rules run. If live inspection is enabled and a TinyFish key is configured, Trapdoor sends up to three eligible extracted URLs to TinyFish Fetch and displays the returned page title, final URL, description, and excerpt. It never sends the full pasted message. TinyFish fetches remotely and returns page content; it does not establish domain reputation, sender identity, or whether a request is legitimate. Some attacks depend on the claimed company, known sender, and conversation history, which page fetching cannot establish. Automated tests mock provider responses and do not contact live sites. Keep API secrets in `.env`; `.gitignore` excludes it.
 
-TinyFish and other external intelligence are future integrations. Add them only after reviewing the provider's current API documentation, terms, and credentials. Keep secrets in a local `.env` file, never commit that file, and never claim provider evidence until the integration actually returns it. AI explanations are also future work; any model should only explain findings returned by the rules and must not manufacture evidence.
+AI-written explanations remain future work; any model should explain findings returned by the rules and must not manufacture evidence.
 
 ## Team
 
@@ -97,7 +109,7 @@ TinyFish and other external intelligence are future integrations. Add them only 
 
 - Calibrate rules against a documented, harmless evaluation set.
 - Add a trusted reputation source with timestamps and explicit unavailable/error states.
-- Consider TinyFish web evidence after API access and safe-fetch design are confirmed.
+- Expand the TinyFish evidence checks against a larger labeled set and measure false positives.
 - Add AI-written summaries grounded only in detector output.
 - Add report export and deployment after security and privacy review.
 

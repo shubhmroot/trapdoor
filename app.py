@@ -6,6 +6,7 @@ import base64
 import binascii
 import ipaddress
 import html
+import hmac
 import json
 import os
 import re
@@ -33,6 +34,17 @@ app.config["MAX_CONTENT_LENGTH"] = 32 * 1024
 TINYFISH_FETCH_ENDPOINT = "https://api.fetch.tinyfish.ai"
 TINYFISH_MAX_URLS = 3
 TINYFISH_TEXT_LIMIT = 1200
+
+
+@app.before_request
+def require_netlify_proxy_for_hosted_api():
+    """Keep the public Render API from bypassing Netlify's rate-limited proxy."""
+    proxy_token = os.getenv("TRAPDOOR_PROXY_TOKEN", "").strip()
+    if proxy_token and request.path.startswith("/api/") and request.path != "/api/health":
+        supplied = request.headers.get("Authorization", "")
+        expected = f"Bearer {proxy_token}"
+        if not hmac.compare_digest(supplied, expected):
+            return jsonify({"error": "Use Trapdoor's public website to access this API."}), 403
 
 BRANDS = {
     "paypal": {"paypal.com"},
@@ -1194,4 +1206,5 @@ def analyze_api():
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=False)
+
 
